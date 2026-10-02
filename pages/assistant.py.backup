@@ -1,0 +1,41 @@
+import streamlit as st
+from groq_client import ask_text, available
+from database import query
+from voice.text_to_speech import speak
+
+def render(user):
+    st.title('🤖 AI Civic Assistant')
+    st.caption('This assistant helps with civic services and is not an official government representative.')
+    if 'assistant_messages' not in st.session_state:
+        st.session_state.assistant_messages = []
+    for msg in st.session_state.assistant_messages:
+        st.chat_message(msg['role']).write(msg['content'])
+
+    q = st.chat_input('Ask about a complaint, status, routing, or how to write a report…')
+    if q:
+        st.session_state.assistant_messages.append({'role':'user','content':q})
+        complaints = (
+            query('SELECT id,title,status,category,ai_summary FROM complaints WHERE citizen_id=? ORDER BY id DESC LIMIT 10',(user['id'],))
+            if user['role']=='citizen' else []
+        )
+        context = '\n'.join(str(x) for x in complaints)
+        ans = ask_text(
+            'You are MAHALA AI civic assistant. Support English and Urdu. '
+            'Do not claim to be a government official. Answer only from user context and general writing guidance. '
+            'Do not invent complaint status, department actions, laws, contacts, or guarantees.',
+            f'User question: {q}\nUser complaint context: {context}',
+            'I can help you write or understand a civic complaint. Please provide the complaint details or complaint ID.'
+        )
+        st.session_state.assistant_messages.append({'role':'assistant','content':ans})
+        st.rerun()
+
+    if st.session_state.assistant_messages:
+        if st.button('🔊 Read latest answer aloud'):
+            latest = next((m['content'] for m in reversed(st.session_state.assistant_messages) if m['role']=='assistant'), '')
+            if latest:
+                speak(latest, user.get('language','English'))
+        if st.button('Clear conversation'):
+            st.session_state.assistant_messages = []
+            st.rerun()
+    if not available():
+        st.caption('AI API is not configured; the assistant uses a safe fallback response.')

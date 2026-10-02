@@ -1,0 +1,224 @@
+import streamlit as st
+from config import CATEGORIES,STATUSES
+from services.complaint_service import analyze_and_create,get_for_citizen,get_one,confirm_submit,save_upload,history
+from services.community_service import cases
+from services.notification_service import list_notifications,unread,mark_read
+from database import query,execute,now
+from voice.speech_to_text import transcribe
+from pages.map import render as map_render
+from pages.assistant import render as assistant_render
+
+def _loc_form():
+    use_location = st.checkbox('Add location to help routing and community clustering', value=False)
+    if not use_location:
+        address = st.text_input('Area / address clue (optional)')
+        return None, None, address
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        lat = st.number_input('Latitude', value=24.9000, format='%.6f')
+    with c2:
+        lon = st.number_input('Longitude', value=67.0700, format='%.6f')
+    with c3:
+        address = st.text_input('Area / address clue')
+    return lat, lon, address
+
+def dashboard(user):
+    cs=get_for_citizen(user['id']); total=len(cs); progress=sum(x['status'] in ['Under Review','Assigned','In Progress'] for x in cs); resolved=sum(x['status'] in ['Resolved','Closed'] for x in cs); comm=len({x['community_case_id'] for x in cs if x['community_case_id']})
+    st.title('Citizen Dashboard'); st.caption('Turn Civic Problems Into Real Action.')
+    a,b,c,d=st.columns(4)
+    for col,label,val in [(a,'Total Complaints',total),(b,'In Progress',progress),(c,'Resolved',resolved),(d,'Community Issues',comm)]: col.metric(label,val)
+    st.subheader('Recent complaints')
+    st.dataframe([{'ID':x['id'],'Title':x['title'],'Category':x['category'],'Priority':x['ai_priority'],'Department':x['department'] or 'Pending','Status':x['status'],'Date':x['created_at'][:10]} for x in cs],use_container_width=True,hide_index=True)
+
+
+def new_complaint(user):
+    st.title('Report a Civic Problem')
+    st.caption('Speak naturally or type your complaint. MAHALA AI will convert it into a structured civic case.')
+
+    # Persistent complaint text
+    if 'complaint_text' not in st.session_state:
+        st.session_state.complaint_text = ''
+
+    if 'complaint_audio_hash' not in st.session_state:
+        st.session_state.complaint_audio_hash = ''
+
+    # Voice-first input
+    st.markdown("### 🎙️ Speak your complaint")
+    st.caption("Tap the microphone and describe the civic problem in English or Urdu.")
+
+    audio = st.audio_input(
+        '🎤 Record complaint',
+        sample_rate=16000,
+        key='complaint_voice_input'
+    )
+
+    if audio:
+        import hashlib
+
+        audio_hash = hashlib.sha256(audio.getvalue()).hexdigest()
+
+        if audio_hash != st.session_state.complaint_audio_hash:
+            st.session_state.complaint_audio_hash = audio_hash
+
+            with st.spinner('🎙️ Converting your voice to text...'):
+                transcribed, msg = transcribe(audio)
+
+            if transcribed and transcribed.strip():
+                st.session_state.complaint_text = transcribed.strip()
+                st.success('✅ Voice converted to text.')
+            else:
+                st.warning(msg or 'Could not understand the recording. Please try again.')
+
+    # Editable transcription / typed complaint
+    st.markdown("### 📝 Complaint description")
+
+    text = st.text_area(
+        'Review or edit your complaint',
+        key='complaint_text',
+        height=150,
+        placeholder='Example: Yahan 5 din se kachra nahi utha aur gali mein bohat gandagi hai...'
+    )
+
+    if text.strip():
+        st.caption('✅ This text will be sent to MAHALA AI for complaint understanding and routing.')
+
+    cat = st.selectbox('Category', CATEGORIES)
+
+    lat, lon, address = _loc_form()
+
+    evidence = st.file_uploader(
+        'Optional Photo / Video Evidence',
+        type=['jpg','jpeg','png','webp','mp4','mov','avi']
+    )
+
+    if st.button(
+        '✨ Analyze Complaint with AI',
+        type='primary',
+        use_container_width=True
+    ):
+        if not text.strip():
+            st.error('Please speak or type your complaint first.')
+            return
+
+        path = save_upload(evidence)
+        et = evidence.type.split('/')[0] if evidence else None
+
+        result = analyze_and_create(
+            user['id'],
+            text.strip(),
+            user.get('language','English'),
+            cat,
+            lat,
+            lon,
+            address,
+            et,
+            path
+        )
+
+        st.session_state.pending_analysis = result
+
+        st.success(
+            f"Complaint #{result['complaint_id']} analyzed. "
+            "Review the AI interpretation before submission."
+        )
+
+        st.rerun()
+
+    # AI interpretation confirmation
+    if st.session_state.get('pending_analysis'):
+        r = st.session_state.pending_analysis
+        u = r['understanding']
+        p = r['priority']
+        rt = r['routing']
+
+        st.divider()
+        st.subheader('🔎 Review AI Understanding')
+
+        st.write('**Title:**', u['title'])
+        st.write('**Description:**', u['summary'])
+        st.write('**Category:**', u['category'])
+        st.write('**Priority:**', p['priority'])
+        st.write('**Impact:**', p['impact_score'])
+        st.write('**Department:**', rt['department'])
+        st.write(
+            '**Community Case:**',
+            r.get('community_case_id') or 'New / not yet grouped'
+        )
+
+        st.info(
+            'Is this what you meant? You can edit the complaint above '
+            'and analyze it again if something is incorrect.'
+        )
+
+        ok = st.checkbox(
+            'I confirm this AI interpretation is correct.'
+        )
+
+        if st.button(
+            '🚀 Submit to Department',
+            disabled=not ok,
+            type='primary'
+        ):
+            success, msg = confirm_submit(
+                r['complaint_id'],
+                user['id']
+            )
+
+            if success:
+                st.success(msg)
+                st.session_state.pop('pending_analysis', None)
+                st.session_state.pop('complaint_text', None)
+                st.session_state.pop('complaint_audio_hash', None)
+            else:
+                st.error(msg)
+
+
+def my_complaints(user):
+    st.title('My Complaints')
+    cs = get_for_citizen(user['id'])
+    if not cs:
+        st.info('No complaints yet. Create your first civic report from New Complaint.')
+        return
+    for c in cs:
+        with st.container(border=True):
+            st.subheader(f"#{c['id']} · {c['title']}")
+            st.write(f"{c['category']} · {c['status']} · {c['ai_priority']} · {c['department'] or 'Unassigned'}")
+            if c['status'] in STATUSES:
+                st.progress(min(1, (STATUSES.index(c['status']) + 1) / len(STATUSES)))
+            st.caption(c['ai_summary'] or c['description'])
+            if c.get('address'):
+                st.caption(f"📍 {c['address']}")
+            if c.get('duplicate_of'):
+                st.warning(f"AI detected a related complaint: #{c['duplicate_of']}. This report is still tracked separately.")
+            if c['government_submitted'] == 0:
+                st.warning('Awaiting your confirmation before government submission.')
+            with st.expander('Status history'):
+                for h in history(c['id']):
+                    st.write(f"**{h['status']}** · {h['created_at']} · {h['note'] or ''}")
+            if c['status'] == 'Resolved' and st.button('Confirm Resolution', key=f'resolve{c["id"]}'):
+                execute('UPDATE complaints SET status="Closed",updated_at=? WHERE id=? AND citizen_id=?',(now(),c['id'],user['id']))
+                execute('INSERT INTO case_updates(complaint_id,department_id,status,note,created_at) VALUES(?,?,?,?,?)',(c['id'],c['routed_department_id'],'Closed','Citizen confirmed resolution.',now()))
+                st.rerun()
+            if c['status'] in ['Resolved','Closed'] and st.button('Reopen Issue',key=f'reopen{c["id"]}'):
+                execute('UPDATE complaints SET status="Reopened",updated_at=? WHERE id=? AND citizen_id=?',(now(),c['id'],user['id']))
+                execute('INSERT INTO case_updates(complaint_id,department_id,status,note,created_at) VALUES(?,?,?,?,?)',(c['id'],c['routed_department_id'],'Reopened','Citizen reopened the issue.',now()))
+                st.rerun()
+
+def community():
+    st.title('Community Issues')
+    for c in cases():
+        with st.container(border=True): st.subheader(c['title']); st.write(f"{c['area_name']} · {c['category']} · {c['complaint_count']} complaints · {c['priority']} · {c['status']} · {c['department'] or 'Unassigned'}")
+
+def notifications(user):
+    st.title('Notifications'); ns=list_notifications(user['id']);
+    if ns:
+        for n in ns:
+            with st.container(border=True): st.write(f"**{n['title']}** — {n['message']}"); st.caption(n['created_at'])
+        if st.button('Mark all as read'): mark_read(user['id']); st.rerun()
+    else: st.info('No notifications yet.')
+
+def profile(user):
+    st.title('Profile'); st.write(f"**Name:** {user.get('full_name','')}"); st.write(f"**Username:** {user.get('username','')}"); st.write(f"**Language:** {user.get('language','English')}")
+
+def render(user,page):
+    {'Dashboard':dashboard,'New Complaint':new_complaint,'My Complaints':my_complaints,'Community Issues':lambda u:community(),'Map':lambda u:map_render(),'AI Assistant':assistant_render,'Profile':profile,'Notifications':notifications}[page](user)
