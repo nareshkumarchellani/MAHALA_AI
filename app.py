@@ -23,9 +23,11 @@ footer,
 [data-testid="stDecoration"] {
     display: none !important;
 }
-/* Sidebar hamesha open rahe */
+/* Sidebar close button visible */
 [data-testid="stSidebarCollapseButton"] {
-    display: none !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 [data-testid="stExpandSidebarButton"],
 [data-testid="stSidebarCollapsedControl"],
