@@ -13,12 +13,18 @@ def css():
 
     /* ===== REMOVE STREAMLIT DEFAULT TOP BAR ===== */
 
-    header[data-testid="stHeader"] {
-        display: none !important;
-        visibility: hidden !important;
-        height: 0 !important;
-        min-height: 0 !important;
-    }
+   header[data-testid="stHeader"] {
+    background: transparent !important;
+    height: 2.75rem !important;
+    min-height: 2.75rem !important;
+}
+
+/* Keep Streamlit sidebar toggle visible */
+button[data-testid="stSidebarCollapseButton"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
 
     div[data-testid="stToolbar"] {
         display: none !important;
