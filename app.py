@@ -5,60 +5,38 @@ from auth import login,register,logout
 from services.notification_service import unread
 from pages import citizen,admin,department
 
-st.set_page_config(page_title=APP_NAME,page_icon='🏙️',layout='wide',initial_sidebar_state='expanded')
-
+st.set_page_config(page_title=APP_NAME, page_icon='🏙️', layout='wide', initial_sidebar_state='expanded')
 def css():
     st.markdown('''
     <style>
 
-    /* ===== REMOVE STREAMLIT DEFAULT TOP BAR ===== */
-
-   header[data-testid="stHeader"] {
+    /* ===== TOP BAR ===== */
+header[data-testid="stHeader"] {
     background: transparent !important;
-    height: 2.75rem !important;
-    min-height: 2.75rem !important;
 }
-
-/* Keep Streamlit sidebar toggle visible */
-button[data-testid="stSidebarCollapseButton"] {
+#MainMenu,
+footer,
+[data-testid="stMainMenu"],
+[data-testid="stAppDeployButton"],
+[data-testid="stToolbarActions"],
+[data-testid="stStatusWidget"],
+[data-testid="stDecoration"] {
+    display: none !important;
+}
+/* Sidebar hamesha open rahe */
+[data-testid="stSidebarCollapseButton"] {
+    display: none !important;
+}
+[data-testid="stExpandSidebarButton"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"] {
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
+    z-index: 999999 !important;
 }
 
-    div[data-testid="stToolbar"] {
-        display: none !important;
-        visibility: hidden !important;
-        height: 0 !important;
-    }
-
-    div[data-testid="stDecoration"] {
-        display: none !important;
-        visibility: hidden !important;
-        height: 0 !important;
-    }
-
-    div[data-testid="stStatusWidget"] {
-        display: none !important;
-        visibility: hidden !important;
-    }
-
-    #MainMenu {
-        display: none !important;
-        visibility: hidden !important;
-    }
-
-    footer {
-        display: none !important;
-        visibility: hidden !important;
-    }
-
-    .stDeployButton {
-        display: none !important;
-        visibility: hidden !important;
-    }
-
-    /* ===== MAHALA AI DESIGN ===== */
+/* ===== MAHALA AI DESIGN ===== */
 
     .stApp {
         background: radial-gradient(
