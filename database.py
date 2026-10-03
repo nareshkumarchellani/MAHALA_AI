@@ -125,6 +125,11 @@ def seed_demo_data():
                     (row['id'], row['routed_department_id'], row['status'], 'Demo complaint seeded for the hackathon.', now())
                 )
         c.commit()
+    try:
+        from demo_seed import seed_extra_demo_data
+        seed_extra_demo_data()
+    except Exception as exc:
+        print('Extra demo data skipped:', exc)
 
 def query(sql, args=()):
     with get_conn() as c:
